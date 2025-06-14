@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Webcam Dither Color</title>
+<style>
+  body {
+    margin: 0; background: #222; color: white; display: flex;
+    flex-direction: column; align-items: center; justify-content: center;
+    height: 100vh; font-family: monospace;
+  }
+  video, canvas {
+    max-width: 90vw; max-height: 60vh; border-radius: 8px;
+    image-rendering: pixelated;
+  }
+  button {
+    margin-top: 10px; padding: 10px 20px; font-size: 1rem;
+    background: #444; border: none; border-radius: 5px;
+    color: white; cursor: pointer;
+  }
+  button:hover { background: #666; }
+</style>
+</head>
+<body>
+<h1>Webcam Color Dithering</h1>
+<video autoplay playsinline></video>
+<canvas></canvas>
+<button id="start-btn">Start Webcam</button>
+
+<script>
+const video = document.querySelector('video');
+const canvas = document.querySelector('canvas');
+const ctx = canvas.getContext('2d');
+const startBtn = document.getElementById('start-btn');
+
+const palette = [
+  [0,0,0], [85,85,85], [170,170,170], [255,255,255],
+  [255,0,0], [0,255,0], [0,0,255],
+  [255,255,0], [255,0,255], [0,255,255]
+];
+
+function nearestColor(r, g, b) {
+  let minDist = Infinity;
+  let nearest = [0,0,0];
+  for (const [pr, pg, pb] of palette) {
+    const dist = (r - pr)**2 + (g - pg)**2 + (b - pb)**2;
+    if (dist < minDist) {
+      minDist = dist;
+      nearest = [pr, pg, pb];
+    }
+  }
+  return nearest;
+}
+
+function dither(imageData) {
+  const w = imageData.width;
+  const h = imageData.height;
+  const data = imageData.data;
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const idx = (y * w + x) * 4;
+      const oldR = data[idx];
+      const oldG = data[idx+1];
+      const oldB = data[idx+2];
+
+      const [newR, newG, newB] = nearestColor(oldR, oldG, oldB);
+
+      const errR = oldR - newR;
+      const errG = oldG - newG;
+      const errB = oldB - newB;
+
+      data[idx] = newR;
+      data[idx+1] = newG;
+      data[idx+2] = newB;
+
+      // Floyd-Steinberg error diffusion
+      if (x + 1 < w) {
+        data[idx + 4] += errR * 7/16;
+        data[idx + 5] += errG * 7/16;
+        data[idx + 6] += errB * 7/16;
+      }
+      if (y + 1 < h) {
+        if (x > 0) {
+          const idx2 = idx + (w - 1) * 4;
+          data[idx2] += errR * 3/16;
+          data[idx2 + 1] += errG * 3/16;
+          data[idx2 + 2] += errB * 3/16;
+        }
+        const idx3 = idx + w * 4;
+        data[idx3] += errR * 5/16;
+        data[idx3 + 1] += errG * 5/16;
+        data[idx3 + 2] += errB * 5/16;
+
+        if (x + 1 < w) {
+          const idx4 = idx + (w + 1) * 4;
+          data[idx4] += errR * 1/16;
+          data[idx4 + 1] += errG * 1/16;
+          data[idx4 + 2] += errB * 1/16;
+        }
+      }
+    }
+  }
+  return imageData;
+}
+
+function startWebcam() {
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+    alert("Webcam not supported on your browser.");
+    return;
+  }
+  navigator.mediaDevices.getUserMedia({ video: true })
+    .then(stream => {
+      video.srcObject = stream;
+      video.play();
+      canvas.width = 320;
+      canvas.height = 240;
+      requestAnimationFrame(processFrame);
+    })
+    .catch(e => {
+      alert("Could not access webcam. Please allow camera permission.");
+      console.error(e);
+    });
+}
+
+function processFrame() {
+  if (video.readyState === video.HAVE_ENOUGH_DATA) {
+    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+    let frame = ctx.getImageData(0, 0, canvas.width, canvas.height);
+    frame = dither(frame);
+    ctx.putImageData(frame, 0, 0);
+  }
+  requestAnimationFrame(processFrame);
+}
+
+startBtn.onclick = startWebcam;
+</script>
+</body>
+</html>
